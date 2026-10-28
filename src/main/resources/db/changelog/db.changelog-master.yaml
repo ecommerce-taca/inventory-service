@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 000-baseline
+      author: db-engineer
+      comment: "Baseline tag for inventorydb database schema before domain tables (R3)"
+      changes:
+        - tagDatabase:
+            tag: baseline
+      rollback:
+        - empty: {}
