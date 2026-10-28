@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: inventory-service
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3306/inventorydb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:inventory}
+    password: ${SPRING_DATASOURCE_PASSWORD:inventory_secret}
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: inventory-service-group
+      auto-offset-reset: earliest
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    enabled: true
+
+server:
+  port: 8080
