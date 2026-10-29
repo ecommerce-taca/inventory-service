@@ -3,6 +3,8 @@ package com.taca.inventory.observability;
 import com.zaxxer.hikari.HikariDataSource;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Environment;
@@ -21,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class HealthProbeService {
 
+    private static final Logger log = LoggerFactory.getLogger(HealthProbeService.class);
 
     public record ReadinessStatus(boolean ready, Map<String, String> components) {
     }
@@ -98,12 +101,19 @@ public class HealthProbeService {
         configs.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 2000);
         configs.put(AdminClientConfig.RETRIES_CONFIG, 0);
 
+        // Kafka resolves its default classes (e.g. DefaultJwtRetriever) by name through the context class loader.
+        // On worker threads of the packaged Spring Boot jar that loader cannot see BOOT-INF/lib, which makes
+        // AdminClientConfig fail to initialise, so use the loader that loaded the Kafka client itself.
+        Thread thread = Thread.currentThread();
+        ClassLoader previousClassLoader = thread.getContextClassLoader();
+        thread.setContextClassLoader(AdminClient.class.getClassLoader());
         AdminClient adminClient = null;
         try {
             adminClient = AdminClient.create(configs);
             adminClient.describeCluster().clusterId().get(2, TimeUnit.SECONDS);
             return true;
         } catch (Exception e) {
+            log.warn("Kafka readiness check failed for {}: {}", servers, e.toString());
             return false;
         } finally {
             if (adminClient != null) {
@@ -112,6 +122,7 @@ public class HealthProbeService {
                 } catch (Exception ignored) {
                 }
             }
+            thread.setContextClassLoader(previousClassLoader);
         }
     }
 
