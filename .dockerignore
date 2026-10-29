@@ -1,0 +1,15 @@
+# Git & version control
+.git/
+.gitignore
+
+# Build output
+target/
+
+# Agentflow and IDEs
+.agentflow/
+.idea/
+*.iml
+
+# Documentation
+docs/
+*.md
