@@ -1,0 +1,98 @@
+name: CI
+
+# Trigger: mọi PR + push lên main/develop đều chạy test & build.
+# Push image: main → latest + <sha>; develop → develop + develop-<sha> (môi trường K8S dev).
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Test · Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java 25 khớp <java.version> trong pom.xml và image eclipse-temurin:25
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      # Integration test dùng Testcontainers (MySQL, Kafka) → cần Docker, ubuntu-latest có sẵn
+      - run: chmod +x mvnw
+      - run: ./mvnw -B -ntp verify
+
+  docker:
+    name: Build & Push Docker image
+    needs: test
+    # Push image chỉ khi push lên main (latest + sha) hoặc develop (develop + develop-sha, dùng cho K8S dev).
+    # PR không push để tránh image tràn Docker Hub.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Đăng nhập Docker Hub bằng secret (không hardcode credential)
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # main → latest + <sha>; develop → develop + develop-<sha> (để rollback được theo SHA)
+      - name: Compute image tags
+        id: tags
+        env:
+          IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/inventory-service
+        run: |
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            printf 'list<<EOF\n%s:latest\n%s:%s\nEOF\n' "$IMAGE" "$IMAGE" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            printf 'list<<EOF\n%s:develop\n%s:develop-%s\nEOF\n' "$IMAGE" "$IMAGE" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-dev:
+    name: Deploy to K8S dev
+    needs: docker
+    # Chỉ deploy khi push lên develop; PR (kể cả từ fork) không bao giờ chạy trên runner trong cụm.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    # Runner ARC chạy trong cụm K8S (ns arc-runners, SA taca-deployer chỉ có quyền ở ns dev)
+    runs-on: arc-taca-cd
+    environment: dev
+    concurrency:
+      group: deploy-dev-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      DEPLOYMENT: inventory-service
+      IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/inventory-service:develop-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-kubectl@v4
+
+      # Manifest nằm trong repo; thay __IMAGE__ bằng image vừa push (tag theo SHA để rollback được)
+      - name: Apply manifest
+        run: sed "s|__IMAGE__|${IMAGE}|g" deploy/k8s/dev/app.yaml | kubectl apply -n dev -f -
+
+      # Rollout không xong trong thời hạn → quay về bản trước và fail job
+      - name: Wait for rollout
+        run: |
+          if ! kubectl -n dev rollout status "deployment/${DEPLOYMENT}" --timeout=10m; then
+            kubectl -n dev describe "deployment/${DEPLOYMENT}" | tail -20
+            kubectl -n dev logs "deployment/${DEPLOYMENT}" --tail=50 || true
+            kubectl -n dev rollout undo "deployment/${DEPLOYMENT}" || true
+            exit 1
+          fi

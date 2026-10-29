@@ -1,0 +1,52 @@
+# Manifest môi trường K8S dev. Job deploy-dev trong ci.yml thay __IMAGE__ bằng image develop-<sha> rồi kubectl apply.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-service
+  labels: { app: inventory-service, part-of: taca }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: inventory-service }
+  template:
+    metadata:
+      labels: { app: inventory-service, part-of: taca }
+    spec:
+      containers:
+        - name: app
+          image: __IMAGE__
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: SERVER_PORT, value: "8080" }
+            - { name: SPRING_DATASOURCE_URL, value: "jdbc:mysql://mysql-cluster.dev.svc:3306/inventorydb?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC" }
+            - { name: SPRING_DATASOURCE_USERNAME, value: inventory }
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: taca-app-secrets, key: INVENTORY_DB_PASSWORD } }
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: taca-common, key: KAFKA_BROKERS } }
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError" }
+          # /health/live không phụ thuộc DB; /health/ready kiểm MySQL/Kafka (docs/api/inventory.md)
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            initialDelaySeconds: 120
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-service
+  labels: { app: inventory-service, part-of: taca }
+spec:
+  selector: { app: inventory-service }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
