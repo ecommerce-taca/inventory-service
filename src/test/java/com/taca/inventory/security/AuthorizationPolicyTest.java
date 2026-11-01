@@ -164,6 +164,20 @@ class AuthorizationPolicyTest {
         }
 
         @Test
+        @DisplayName("Chấp nhận role SUPER_ADMIN của auth-user khi có quyền nâng cao")
+        void requireAdminStepUp_succeedsForAuthUserSuperAdmin() {
+            ActorContext adminActor = ActorContext.builder()
+                    .userId("admin-02")
+                    .roles(Set.of("SUPER_ADMIN"))
+                    .permissions(Set.of("inventory:reconcile"))
+                    .build();
+            ActorContext.setCurrent(adminActor);
+
+            assertThatCode(() -> policy.requireAdminStepUp("inventory:reconcile"))
+                    .doesNotThrowAnyException();
+        }
+
+        @Test
         @DisplayName("Ném INVENTORY_FORBIDDEN (403) khi Admin không có quyền nâng cao tương ứng")
         void requireAdminStepUp_throwsForbiddenWhenMissingPermission() {
             ActorContext adminActor = ActorContext.builder()

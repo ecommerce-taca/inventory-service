@@ -59,8 +59,13 @@ public class ActorContext {
         return getRoles().contains("SELLER");
     }
 
+    /**
+     * Admin role names follow auth-user (RbacKeys): SUPER_ADMIN is the platform admin.
+     * "ADMIN" is kept for backward compatibility with existing tooling/tests.
+     */
     public boolean isAdmin() {
-        return getRoles().contains("ADMIN");
+        Set<String> roles = getRoles();
+        return roles.contains("SUPER_ADMIN") || roles.contains("ADMIN");
     }
 
     public boolean hasRole(String role) {

@@ -55,7 +55,7 @@ public class AuthorizationPolicy {
     }
 
     /**
-     * Enforces that the requesting actor has the ADMIN role and possesses the required step-up permission.
+     * Enforces that the requesting actor has an admin role (SUPER_ADMIN, or legacy ADMIN) and possesses the required step-up permission.
      *
      * @param permission the required permission (e.g. inventory:reconcile)
      * @throws InventoryException if unauthenticated, not an admin, or missing the permission
